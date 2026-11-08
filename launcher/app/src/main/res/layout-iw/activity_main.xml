@@ -401,6 +401,29 @@
         </FrameLayout>
     </LinearLayout>
 
+    <!-- Right Widgets Panel: Weather (7-hour forecast) & Now Playing -->
+    <LinearLayout
+        android:id="@+id/rightWidgetsPanel"
+        android:layout_width="356dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="56dp"
+        android:layout_marginTop="126dp"
+        android:orientation="vertical"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:focusable="false"
+        android:importantForAccessibility="no">
+
+        <include
+            android:id="@+id/widgetWeather"
+            layout="@layout/widget_weather" />
+
+        <include
+            android:id="@+id/widgetNowPlaying"
+            layout="@layout/widget_now_playing" />
+    </LinearLayout>
+
     <!-- The single floating glass highlight that springs between tiles. -->
     <com.gathin.tvhome.GlassView
         android:id="@+id/glass"

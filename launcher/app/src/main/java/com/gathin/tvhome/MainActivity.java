@@ -3,6 +3,7 @@ package com.gathin.tvhome;
 import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
@@ -59,9 +60,13 @@ import android.view.View;
 import android.view.SoundEffectConstants;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.view.ViewOutlineProvider;
+import android.graphics.Outline;
+import android.view.LayoutInflater;
 import android.view.Window;
 import android.view.animation.AnimationUtils;
 import android.view.animation.LayoutAnimationController;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -205,6 +210,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int glassCardW;   // width of the tile the glass was last fitted to
     private boolean glassShown;
     private final Rect tileRect = new Rect();
+
+    // Right Widgets Panel (Weather & Now Playing)
+    private View rightWidgetsPanel;
+    private View widgetWeather;
+    private WeatherHelper weatherHelper;
+    private TextView weatherCity;
+    private TextView weatherCondition;
+    private TextView weatherCurrentTemp;
+    private LinearLayout hoursContainer;
+    private View nowPlayingCard;
+    private View nowPlayingOpenApp;
+    private ImageView nowPlayingArt;
+    private TextView nowPlayingPlaceholder;
+    private TextView nowPlayingTitle;
+    private TextView nowPlayingArtist;
+    private TextView nowPlayingStatus;
+    private TextView btnMediaPrev;
+    private TextView btnMediaPlayPause;
+    private TextView btnMediaNext;
+    private String nowPlayingPackage;
     private final Rect revealRect = new Rect();
     // Static so they survive the activity being destroyed while another app is open (low-memory TVs,
     // or Developer options → "Don't keep activities"); they only reset when the process dies.
@@ -497,6 +522,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         vpnApp = cfg.vpnApp;
         moduleCards = cfg.moduleCards;
         hiddenApps = new HashSet<>(cfg.hiddenApps);
+        initWidgets();
 
         grid = findViewById(R.id.grid);
         rtlAppGrid = getResources().getBoolean(R.bool.rtl_app_grid);
@@ -764,6 +790,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return true;
             if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (rightWidgetsPanel != null && rightWidgetsPanel.getAlpha() > 0.5f && widgetWeather != null && widgetWeather.isShown()) {
+                    widgetWeather.requestFocus();
+                    return true;
+                }
                 // Back to the dock tile Up came from, not wherever the focus finder lands.
                 focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
                 return true;
@@ -930,6 +960,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         restartIdleClock();
         promptsPaused = false;
+        if (weatherHelper != null) weatherHelper.refresh();
+        MediaNotificationListener listener = MediaNotificationListener.getInstance();
+        if (listener != null) {
+            listener.queryActiveMedia();
+        } else {
+            try {
+                MediaNotificationListener.requestRebind(new ComponentName(this, MediaNotificationListener.class));
+            } catch (Exception ignored) { }
+        }
         if (grid.getAdapter() == null) grid.setAdapter(adapter);   // dropped by onTrimMemory
         switch (tileRefresh.onResume(packagesChangedSinceRebuild())) {
             case REBUILD:
@@ -1704,6 +1743,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             hero.setY(y);
             hero.setTranslationX(0f);
             hero.setAlpha(1f);
+            if (rightWidgetsPanel != null) rightWidgetsPanel.setAlpha(1f);
             if (ambientGlow) {
                 setAmbient(color);
                 ambient.setAlpha(1f);
@@ -1720,6 +1760,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             hero.setY(y);
             hero.setTranslationX(0f);
             hero.animate().alpha(1f).setDuration(260).start();
+            if (rightWidgetsPanel != null) rightWidgetsPanel.animate().alpha(1f).setDuration(260).start();
             if (ambientGlow) {
                 setAmbient(color);
                 ambient.animate().alpha(1f).setDuration(600).start();
@@ -1756,13 +1797,317 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     // ---- cinematic shelf -------------------------------------------------------------------------
 
+    private void initWidgets() {
+        rightWidgetsPanel = findViewById(R.id.rightWidgetsPanel);
+        if (rightWidgetsPanel == null) return;
+
+        widgetWeather = findViewById(R.id.widgetWeather);
+        if (widgetWeather == null) widgetWeather = findViewById(R.id.weatherCardRoot);
+        weatherCity = findViewById(R.id.weatherCity);
+        weatherCondition = findViewById(R.id.weatherCondition);
+        weatherCurrentTemp = findViewById(R.id.weatherCurrentTemp);
+        hoursContainer = findViewById(R.id.hoursContainer);
+        weatherHelper = new WeatherHelper(this);
+        weatherHelper.setCallback(this::updateWeatherUI);
+        weatherHelper.refresh();
+
+        if (widgetWeather != null) {
+            widgetWeather.setOnClickListener(v -> showWeatherLocationDialog());
+            widgetWeather.setOnFocusChangeListener((v, focused) -> v.animate()
+                    .scaleX(focused ? 1.02f : 1f).scaleY(focused ? 1.02f : 1f)
+                    .setDuration(120).start());
+            widgetWeather.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    View wifi = findViewById(R.id.btnWifi);
+                    if (wifi != null && wifi.getVisibility() == View.VISIBLE) wifi.requestFocus();
+                    else findViewById(R.id.btnSettings).requestFocus();
+                    return true;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (nowPlayingOpenApp != null && nowPlayingOpenApp.isShown()) {
+                        nowPlayingOpenApp.requestFocus();
+                        return true;
+                    }
+                    focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
+                    return true;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    focusTile(0);
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        nowPlayingCard = findViewById(R.id.widgetNowPlaying);
+        if (nowPlayingCard == null) nowPlayingCard = findViewById(R.id.nowPlayingCardRoot);
+        nowPlayingOpenApp = findViewById(R.id.nowPlayingOpenApp);
+        nowPlayingArt = findViewById(R.id.nowPlayingArt);
+        nowPlayingPlaceholder = findViewById(R.id.nowPlayingPlaceholder);
+        nowPlayingTitle = findViewById(R.id.nowPlayingTitle);
+        nowPlayingArtist = findViewById(R.id.nowPlayingArtist);
+        nowPlayingStatus = findViewById(R.id.nowPlayingStatus);
+        btnMediaPrev = findViewById(R.id.btnMediaPrev);
+        btnMediaPlayPause = findViewById(R.id.btnMediaPlayPause);
+        btnMediaNext = findViewById(R.id.btnMediaNext);
+
+        if (nowPlayingArt != null) {
+            nowPlayingArt.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), 10 * density);
+                }
+            });
+            nowPlayingArt.setClipToOutline(true);
+        }
+
+        if (nowPlayingCard != null) {
+            nowPlayingCard.setOnClickListener(v -> MediaNotificationListener.openActiveApp(this));
+        }
+
+        if (nowPlayingOpenApp != null) {
+            nowPlayingOpenApp.setOnClickListener(v -> MediaNotificationListener.openActiveApp(this));
+            nowPlayingOpenApp.setOnFocusChangeListener((v, focused) -> v.animate()
+                    .scaleX(focused ? 1.02f : 1f).scaleY(focused ? 1.02f : 1f)
+                    .setDuration(120).start());
+            nowPlayingOpenApp.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (widgetWeather != null && widgetWeather.isShown()) {
+                        widgetWeather.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
+                    return true;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (btnMediaPrev != null && btnMediaPrev.isShown()) {
+                        btnMediaPrev.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    focusTile(0);
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        if (btnMediaPrev != null) {
+            btnMediaPrev.setOnClickListener(v -> MediaNotificationListener.skipToPrevious());
+            btnMediaPrev.setOnFocusChangeListener((v, focused) -> v.animate()
+                    .scaleX(focused ? 1.15f : 1f).scaleY(focused ? 1.15f : 1f)
+                    .setDuration(120).start());
+            btnMediaPrev.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (widgetWeather != null && widgetWeather.isShown()) {
+                        widgetWeather.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
+                    return true;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (nowPlayingOpenApp != null && nowPlayingOpenApp.isShown()) {
+                        nowPlayingOpenApp.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (btnMediaPlayPause != null && btnMediaPlayPause.isShown()) {
+                        btnMediaPlayPause.requestFocus();
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+
+        if (btnMediaPlayPause != null) {
+            btnMediaPlayPause.setOnClickListener(v -> MediaNotificationListener.togglePlayPause());
+            btnMediaPlayPause.setOnFocusChangeListener((v, focused) -> v.animate()
+                    .scaleX(focused ? 1.15f : 1f).scaleY(focused ? 1.15f : 1f)
+                    .setDuration(120).start());
+            btnMediaPlayPause.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (widgetWeather != null && widgetWeather.isShown()) {
+                        widgetWeather.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
+                    return true;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (btnMediaPrev != null && btnMediaPrev.isShown()) {
+                        btnMediaPrev.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (btnMediaNext != null && btnMediaNext.isShown()) {
+                        btnMediaNext.requestFocus();
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+
+        if (btnMediaNext != null) {
+            btnMediaNext.setOnClickListener(v -> MediaNotificationListener.skipToNext());
+            btnMediaNext.setOnFocusChangeListener((v, focused) -> v.animate()
+                    .scaleX(focused ? 1.15f : 1f).scaleY(focused ? 1.15f : 1f)
+                    .setDuration(120).start());
+            btnMediaNext.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (widgetWeather != null && widgetWeather.isShown()) {
+                        widgetWeather.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
+                    return true;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (btnMediaPlayPause != null && btnMediaPlayPause.isShown()) {
+                        btnMediaPlayPause.requestFocus();
+                        return true;
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        MediaNotificationListener.setCallback(this::updateNowPlayingUI);
+        MediaNotificationListener listener = MediaNotificationListener.getInstance();
+        if (listener != null) {
+            listener.queryActiveMedia();
+        } else {
+            try {
+                MediaNotificationListener.requestRebind(new ComponentName(this, MediaNotificationListener.class));
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private void showWeatherLocationDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert);
+        builder.setTitle("Weather Location");
+        builder.setMessage("Enter city name (e.g. Mumbai, London, New York):");
+
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setTextColor(0xFFFFFFFF);
+        input.setHintTextColor(0x80FFFFFF);
+        input.setHint("City name");
+        if (weatherCity != null && weatherCity.getText() != null) {
+            String current = weatherCity.getText().toString().replace(" ✎", "").trim();
+            if (!current.equalsIgnoreCase("Weather") && !current.equalsIgnoreCase("Local Weather")) {
+                input.setText(current);
+                input.setSelection(current.length());
+            }
+        }
+        FrameLayout container = new FrameLayout(this);
+        int pad = Math.round(20 * density);
+        container.setPadding(pad, pad / 2, pad, pad / 2);
+        container.addView(input);
+        builder.setView(container);
+
+        builder.setPositiveButton("Save", (dialog, which) -> {
+            String entered = input.getText().toString().trim();
+            if (!entered.isEmpty() && weatherHelper != null) {
+                Toast.makeText(this, "Searching: " + entered + "...", Toast.LENGTH_SHORT).show();
+                weatherHelper.setLocation(entered,
+                        () -> Toast.makeText(this, "Weather location updated!", Toast.LENGTH_SHORT).show(),
+                        err -> Toast.makeText(this, err, Toast.LENGTH_SHORT).show());
+            }
+        });
+
+        builder.setNeutralButton("Auto-detect", (dialog, which) -> {
+            if (weatherHelper != null) {
+                Toast.makeText(this, "Detecting location via IP...", Toast.LENGTH_SHORT).show();
+                weatherHelper.setAutoLocation(() -> Toast.makeText(this, "Location detected!", Toast.LENGTH_SHORT).show());
+            }
+        });
+
+        builder.setNegativeButton("Cancel", null);
+        AlertDialog dialog = builder.create();
+        dialog.show();
+    }
+
+    private void updateWeatherUI(WeatherHelper.WeatherData data) {
+        if (data == null || weatherCity == null) return;
+        weatherCity.setText(data.city);
+        weatherCondition.setText(data.condition);
+        weatherCurrentTemp.setText(data.currentTemp);
+
+        if (hoursContainer != null) {
+            hoursContainer.removeAllViews();
+            LayoutInflater inflater = LayoutInflater.from(this);
+            for (WeatherHelper.HourForecast h : data.hours) {
+                View hourView = inflater.inflate(R.layout.item_weather_hour, hoursContainer, false);
+                TextView tvTime = hourView.findViewById(R.id.hourTime);
+                TextView tvIcon = hourView.findViewById(R.id.hourIcon);
+                TextView tvTemp = hourView.findViewById(R.id.hourTemp);
+                tvTime.setText(h.time);
+                tvIcon.setText(h.icon);
+                tvTemp.setText(h.temp);
+                hoursContainer.addView(hourView);
+            }
+        }
+    }
+
+    private void updateNowPlayingUI(MediaNotificationListener.MediaInfo info) {
+        if (nowPlayingCard == null) return;
+        if (info == null || (info.title == null && info.artist == null)) {
+            nowPlayingTitle.setText("Not Playing");
+            nowPlayingArtist.setText("Background audio idle");
+            nowPlayingStatus.setText("Media idle");
+            if (btnMediaPlayPause != null) btnMediaPlayPause.setText("▶");
+            nowPlayingArt.setImageDrawable(null);
+            nowPlayingPlaceholder.setVisibility(View.VISIBLE);
+            nowPlayingPackage = null;
+            return;
+        }
+
+        nowPlayingPackage = info.packageName;
+        nowPlayingTitle.setText(info.title != null ? info.title : "Now Playing");
+        nowPlayingArtist.setText(info.artist != null ? info.artist : "");
+        nowPlayingStatus.setText(info.appName + " · " + (info.isPlaying ? "Playing" : "Paused"));
+        if (btnMediaPlayPause != null) {
+            btnMediaPlayPause.setText(info.isPlaying ? "❚❚" : "▶");
+        }
+
+        if (info.albumArt != null) {
+            nowPlayingArt.setImageBitmap(info.albumArt);
+            nowPlayingPlaceholder.setVisibility(View.GONE);
+        } else {
+            nowPlayingArt.setImageDrawable(null);
+            nowPlayingPlaceholder.setVisibility(View.VISIBLE);
+        }
+    }
+
     /**
      * The parts that never change: a larger name, the meta line and the dots, the artwork and the scrim, at
      * scrimPercent of its strength (cinematic_scrim). cinematic_art 0 leaves the artwork out, 0 percent the scrim.
      */
     private void setUpCinematicShelf(int scrimPercent) {
-        heroName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 68f);
-        heroName.setLetterSpacing(-0.025f);
+        heroName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 32f);
+        heroName.setLetterSpacing(-0.02f);
         heroMeta.setVisibility(View.INVISIBLE);   // keeps its height, so the name does not jump when it fills in
         heroDots.setVisibility(heroDotsShown ? View.VISIBLE : View.GONE);
         heroArt.setVisibility(heroArtAlpha > 0f ? View.VISIBLE : View.GONE);
@@ -1991,6 +2336,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ambient.animate().cancel();
         heroArt.animate().cancel();
         heroShown = false;
+        if (rightWidgetsPanel != null) rightWidgetsPanel.animate().alpha(0f).setDuration(160).start();
         if (animations && !reducedMotion) {
             hero.animate().alpha(0f).setDuration(160).start();
             if (ambientGlow) ambient.animate().alpha(0f).setDuration(300).start();
@@ -2232,7 +2578,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     rtlAppGrid, keyCode == KeyEvent.KEYCODE_DPAD_LEFT);
         }
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
+            if (position < COLUMNS) {
+                if (position >= 2 && rightWidgetsPanel != null && rightWidgetsPanel.getAlpha() > 0.5f) {
+                    if (nowPlayingOpenApp != null && nowPlayingOpenApp.isShown()) {
+                        nowPlayingOpenApp.requestFocus();
+                        return true;
+                    }
+                }
+                return false;          // dock row: let focus move to the top bar
+            }
             target = position - COLUMNS;
         } else {
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;

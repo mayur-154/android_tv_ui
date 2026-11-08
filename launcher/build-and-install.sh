@@ -218,4 +218,5 @@ if [ "${HOME_KEY_SERVICE:-0}" = 1 ]; then enable_service HomeKeyService; fi
 if [ "${RESTORE_KEY_SERVICES:-0}" = 1 ]; then
   "$PY" -I ../tools/tv.py "pm grant com.gathin.tvhome android.permission.WRITE_SECURE_SETTINGS && echo restore-granted"
 fi
+"$PY" -I ../tools/tv.py "cmd notification allow_listener com.gathin.tvhome/.MediaNotificationListener 0 2>/dev/null || true"
 echo "Installed. Press Home on the remote to see it."

@@ -1,12 +1,11 @@
 {
   "dock_apps": [
-    "com.netflix.ninja",
     "com.google.android.youtube.tv",
     "com.amazon.amazonvideo.livingroom",
-    "com.disney.disneyplus",
-    "com.wbd.stream",
-    "com.apple.atve.androidtv.appletv"
+    "com.spotify.tv.android",
+    "com.netflix.ninja"
   ],
+  "columns": 4,
   "background_color": "#090C14",
   "wallpaper": true,
   "cinematic_home": true,
@@ -15,5 +14,15 @@
   "app_glow": true,
   "glow_style": "horizon",
   "focus_overshoot": false,
-  "advanced_effects": true
+  "advanced_effects": true,
+  "settings_key_panel": true,
+  "settings_key_keycodes": [176, 83, 281, 282],
+  "wifi_status_color": true,
+  "wifi_label_width": 140,
+  "show_stats": false,
+  "greeting_name": "",
+  "home_idle_clock_minutes": 5,
+  "app_library": true,
+  "tile_menu": true,
+  "uniform_tiles": false
 }
